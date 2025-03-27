@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NFT Mint</title>
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+    <h2>Minting your NFT...</h2>
+    <p id="status">Please approve the transaction in MetaMask.</p>
+
+    <script>
+        const ABI_URL = "COTIDIAN_ABI.JSON";
+        const CONTRACT_ADDRESS = "0x81b9adfa972281084ae49d707f0a4aa8af5c28f9"; // COTI testnet
+        const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1348623628308054037/XI-Dtm7oTXV-keXWXHhzp0Z_FiufTg-rGJxmkeQG28HP5YklOLAnbRtxdhkwLVq6zHhO"; 
+
+        async function getABI() {
+            const response = await fetch(ABI_URL);
+            return response.json();
+        }
+
+        async function mintNFT() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const image = urlParams.get("image");
+
+            console.log("URL Parameters (Raw):", {
+                image
+            });
+
+            if (!window.ethereum) {
+                alert("MetaMask not detected.");
+                return;
+            }
+
+            try {
+                await window.ethereum.request({ method: "eth_requestAccounts" });
+                const provider = new ethers.providers.Web3Provider(window.ethereum);
+                const signer = provider.getSigner();
+				const userAddress = await signer.getAddress();
+                const network = await provider.getNetwork(); // Check network
+                console.log("Current network:", network);
+
+                if (network.chainId !== 7082400) { // COTI testnet chain ID
+                    document.getElementById("status").innerText = "Wrong network. Please switch to COTI testnet (chain ID 7082400).";
+                    alert("Wrong network. Please switch to COTI testnet (chain ID 7082400) in MetaMask.");
+                    return;
+                }
+
+                const abi = await getABI();
+                const contract = new ethers.Contract(CONTRACT_ADDRESS, abi, signer);
+
+                // Use values for the transaction
+                const tx = await contract.mint(
+                    userAddress,
+                    image
+                );
+
+                document.getElementById("status").innerText = "Waiting for confirmation...";
+
+                const receipt = await tx.wait();
+                console.log("Transaction Receipt (Full):", receipt);
+                const txhash = receipt.transactionHash
+
+                // Format result for Discord                
+                let txlink = "https://testnet.cotiscan.io/transaction/" + txhash;
+
+                // Create a Discord embed object
+                let embed = {
+                    title: `NFT minted!`,
+                    color: 0x00ff00, // Green)
+                    thumbnail: { url: image },					
+                    fields: [
+                        { name: "View transaction on", value: `[COTI explorer](${txlink})`, inline: false },  
+                    ],
+                    footer: {
+                        text: `Thank you for using COTIDIAN.`
+                    }
+                   
+                };
+
+                // Send the embed to Discord with error handling
+                try {
+                    const response = await fetch(DISCORD_WEBHOOK_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ embeds: [embed] }) // Send as an embed array
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Discord webhook failed with status ${response.status}: ${await response.text()}`);
+                    }
+
+                    console.log("Discord embed sent successfully");
+                } catch (error) {
+                    console.error("Failed to send to Discord:", error);
+                    document.getElementById("status").innerText = "Error sending to Discord: " + error.message;
+                    alert("Failed to send transaction receipt to Discord: " + error.message);
+                }
+
+                document.getElementById("status").innerText = "NFT Created! " ;
+
+                setTimeout(() => window.close(), 3000); // Close after 3 sec
+            } catch (error) {
+                document.getElementById("status").innerText = "Error: " + error.message;
+                console.error("Transaction failed", error);
+                alert("Transaction failed: " + error.message);
+
+                // Send error to Discord
+                const errorMessage = `Error: ${error.message}\nStack: ${error.stack || 'No stack trace'}`;
+                try {
+                    await fetch(DISCORD_WEBHOOK_URL, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ content: `Error in transaction:\n\`\`\`\n${errorMessage}\`\`\`` })
+                    });
+                } catch (discordError) {
+                    console.error("Failed to send error to Discord:", discordError);
+                }
+            }
+        }
+
+        window.onload = mintNFT;
+    </script>
+</body>
+</html>
